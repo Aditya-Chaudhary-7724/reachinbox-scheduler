@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  googleId  String   @unique
+  email     String
+  name      String
+  avatarUrl String?
+  createdAt DateTime @default(now())
+
+  campaigns       Campaign[]
+  emails          Email[]
+  slackConnection SlackConnection?
+}
+
+model Sender {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  smtpHost  String
+  smtpPort  Int
+  smtpUser  String
+  smtpPass  String
+  createdAt DateTime @default(now())
+
+  emails Email[]
+}
+
+model Campaign {
+  id             String   @id @default(uuid())
+  userId         String
+  subject        String
+  body           String
+  startTime      DateTime
+  delayBetweenMs Int
+  hourlyLimit    Int
+  totalEmails    Int
+  createdAt      DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  emails Email[]
+
+  @@index([userId, createdAt])
+}
+
+enum EmailStatus {
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+  RATE_LIMITED
+}
+
+model Email {
+  id                  String      @id @default(uuid())
+  campaignId          String
+  userId              String
+  senderId            String
+  toAddress           String
+  subject             String
+  body                String
+  scheduledAt         DateTime
+  // scheduledAt moves forward when rate-limited; this keeps the time the user asked for.
+  originalScheduledAt DateTime
+  status              EmailStatus @default(SCHEDULED)
+  sentAt              DateTime?
+  messageId           String?
+  previewUrl          String?
+  error               String?
+  attempts            Int         @default(0)
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sender   Sender   @relation(fields: [senderId], references: [id])
+
+  @@unique([campaignId, toAddress])
+  @@index([userId, status, scheduledAt])
+  // Boot reconciliation scans pending emails across all users.
+  @@index([status, scheduledAt])
+}
+
+model SlackConnection {
+  id         String   @id @default(uuid())
+  userId     String   @unique
+  teamId     String
+  teamName   String
+  channel    String
+  // AES-256-GCM ciphertext (iv:tag:data, base64) of the incoming webhook URL.
+  webhookUrl String
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
