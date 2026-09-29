@@ -5,6 +5,7 @@ import { createRedisConnection, redis } from './queue/connection';
 import { processEmailJob } from './queue/processor';
 import { EMAIL_QUEUE_NAME, emailQueue, type EmailJobData } from './queue/queue';
 import { reconcilePendingEmails } from './queue/reconcile';
+import { ensureSearchIndex } from './services/search';
 import { closeTransporters } from './services/mailer';
 import { logger } from './utils/logger';
 
@@ -28,10 +29,19 @@ async function main() {
   worker.on('error', (err) => logger.error({ err }, 'Worker error'));
 
   logger.info(
-    { concurrency: env.WORKER_CONCURRENCY, minSendIntervalMs: env.MIN_SEND_INTERVAL_MS },
+    {
+      concurrency: env.WORKER_CONCURRENCY,
+      minSendIntervalMs: env.MIN_SEND_INTERVAL_MS,
+      maxPerSenderPerHour: env.MAX_EMAILS_PER_HOUR_PER_SENDER,
+      maxPerHour: env.MAX_EMAILS_PER_HOUR ?? 'unlimited',
+      mockSmtp: env.MOCK_SMTP,
+    },
     'Worker started',
   );
 
+  await ensureSearchIndex().catch((err: unknown) =>
+    logger.error({ err }, 'Could not ensure Elasticsearch index; indexing will fail until fixed'),
+  );
   await reconcilePendingEmails().catch((err: unknown) =>
     logger.error({ err }, 'Boot reconciliation failed'),
   );

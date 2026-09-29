@@ -1,4 +1,5 @@
 import { Queue, type JobsOptions } from 'bullmq';
+import { env } from '../config/env';
 import { redis } from './connection';
 
 export const EMAIL_QUEUE_NAME = 'email-send';
@@ -11,8 +12,8 @@ export interface EmailJobData {
 const ADD_BULK_CHUNK_SIZE = 500;
 
 export const defaultJobOptions: JobsOptions = {
-  attempts: 3,
-  backoff: { type: 'exponential', delay: 30_000 },
+  attempts: env.JOB_ATTEMPTS,
+  backoff: { type: 'exponential', delay: env.JOB_BACKOFF_MS },
   removeOnComplete: { age: 24 * 60 * 60, count: 10_000 },
   removeOnFail: { age: 7 * 24 * 60 * 60 },
 };

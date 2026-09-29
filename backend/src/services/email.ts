@@ -137,3 +137,30 @@ export async function getStats(userId: string): Promise<Record<EmailStatus, numb
   for (const g of grouped) stats[g.status] = g._count._all;
   return stats;
 }
+
+/**
+ * Hands a claimed email back as RATE_LIMITED with its new slot time. RATE_LIMITED rows are
+ * claimable again once due, so the rescheduled job goes through the same atomic claim.
+ */
+export async function markRateLimited(emailId: string, scheduledAt: Date): Promise<void> {
+  await prisma.email.updateMany({
+    where: { id: emailId, status: EmailStatus.SENDING },
+    data: { status: EmailStatus.RATE_LIMITED, scheduledAt },
+  });
+}
+
+/** Pending emails for a user+sender still due before `before`: all will be deferred. */
+export async function countPendingBefore(
+  userId: string,
+  senderId: string | undefined,
+  before: Date,
+): Promise<number> {
+  return prisma.email.count({
+    where: {
+      userId,
+      ...(senderId ? { senderId } : {}),
+      status: { in: SCHEDULED_STATUSES },
+      scheduledAt: { lt: before },
+    },
+  });
+}

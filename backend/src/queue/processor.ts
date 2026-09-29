@@ -1,11 +1,29 @@
 import { DelayedError, type Job } from 'bullmq';
-import { EmailStatus } from '@prisma/client';
+import { EmailStatus, type Sender } from '@prisma/client';
 import { env } from '../config/env';
 import { prisma } from '../db/prisma';
-import { claimEmail, markFailed, markSent, releaseForRetry } from '../services/email';
+import {
+  claimEmail,
+  countPendingBefore,
+  markFailed,
+  markRateLimited,
+  markSent,
+  releaseForRetry,
+  type ClaimedEmail,
+} from '../services/email';
 import { sendMail } from '../services/mailer';
+import { syncEmailToIndex } from '../services/search';
+import { formatRateLimitAlert, notifyUser } from '../services/slack';
 import { logger } from '../utils/logger';
+import { redis } from './connection';
 import type { EmailJobData } from './queue';
+import {
+  claimLimitNotification,
+  consumeHourlyQuota,
+  effectiveHourlyLimit,
+  reserveDeferralSlot,
+  type QuotaDecision,
+} from './rateLimiter';
 
 export type ProcessOutcome = 'sent' | 'skipped' | 'deferred';
 
@@ -60,6 +78,58 @@ async function handleUnclaimed(
   }
 }
 
+/**
+ * The email hit an hourly limit: give it an ordered slot in the next window with room,
+ * persist the new time, alert Slack (once per sender per window) and re-delay the job.
+ */
+async function deferForRateLimit(
+  job: Job<EmailJobData>,
+  token: string | undefined,
+  email: ClaimedEmail,
+  sender: Sender,
+  decision: Extract<QuotaDecision, { allowed: false }>,
+): Promise<never> {
+  const deferral = await reserveDeferralSlot(redis, decision.deniedBy, decision.limit);
+  await markRateLimited(email.id, deferral.runAt);
+  void syncEmailToIndex(email.id);
+
+  logger.info(
+    {
+      emailId: email.id,
+      deniedBy: decision.deniedBy.kind,
+      sender: sender.email,
+      limit: decision.limit,
+      runAt: deferral.runAt,
+      slot: deferral.slot,
+    },
+    'Hourly limit reached; email deferred',
+  );
+
+  if (await claimLimitNotification(redis, email.userId, decision.deniedBy, decision.window)) {
+    const isSender = decision.deniedBy.kind === 'sender';
+    const deferredCount = await countPendingBefore(
+      email.userId,
+      isSender ? sender.id : undefined,
+      decision.window.end,
+    );
+    const delivered = await notifyUser(
+      email.userId,
+      formatRateLimitAlert({
+        scope: isSender ? sender.email : 'all senders (global limit)',
+        limit: decision.limit,
+        windowStart: decision.window.start,
+        windowEnd: decision.window.end,
+        // The email being deferred right now is no longer counted as pending.
+        deferredCount: deferredCount + 1,
+        nextWindowAt: decision.window.end,
+      }),
+    );
+    logger.info({ userId: email.userId, delivered }, 'Rate-limit Slack notification processed');
+  }
+
+  return deferJob(job, token, deferral.runAt.getTime());
+}
+
 function isFinalAttempt(job: Job<EmailJobData>): boolean {
   return job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
 }
@@ -73,10 +143,25 @@ export async function processEmailJob(
   // 1. Atomic claim in Postgres: the only gate that allows a send.
   const email = await claimEmail(emailId);
   if (!email) return handleUnclaimed(job, token);
+  void syncEmailToIndex(email.id);
 
-  const sender = await prisma.sender.findUniqueOrThrow({ where: { id: email.senderId } });
+  const [sender, campaign] = await Promise.all([
+    prisma.sender.findUniqueOrThrow({ where: { id: email.senderId } }),
+    prisma.campaign.findUniqueOrThrow({
+      where: { id: email.campaignId },
+      select: { hourlyLimit: true },
+    }),
+  ]);
 
-  // 2. Send. The Message-ID is derived from emailId so a rare duplicate is identifiable.
+  // 2. Hourly quota (Redis Lua, shared by all workers). Denied → defer, never drop.
+  const decision = await consumeHourlyQuota(redis, {
+    senderId: sender.id,
+    senderLimit: effectiveHourlyLimit(campaign.hourlyLimit, env.MAX_EMAILS_PER_HOUR_PER_SENDER),
+    globalLimit: env.MAX_EMAILS_PER_HOUR,
+  });
+  if (!decision.allowed) return deferForRateLimit(job, token, email, sender, decision);
+
+  // 3. Send. The Message-ID is derived from emailId so a rare duplicate is identifiable.
   let result;
   try {
     result = await sendMail(sender, {
@@ -94,11 +179,13 @@ export async function processEmailJob(
       await releaseForRetry(email.id, message);
       logger.warn({ emailId, attempt: job.attemptsMade + 1, err }, 'Send failed; will retry');
     }
+    void syncEmailToIndex(email.id);
     throw err;
   }
 
-  // 3. Record success.
+  // 4. Record success.
   await markSent(email.id, result);
+  void syncEmailToIndex(email.id);
   logger.info(
     { emailId, to: email.toAddress, sender: sender.email, previewUrl: result.previewUrl },
     'Email sent',

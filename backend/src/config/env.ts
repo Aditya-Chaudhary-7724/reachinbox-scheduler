@@ -38,6 +38,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
   ELASTICSEARCH_URL: z.string().url().default('http://localhost:9200'),
+  ELASTICSEARCH_INDEX: z.string().min(1).default('emails'),
 
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   GOOGLE_CLIENT_ID: optionalString,
@@ -47,6 +48,7 @@ const envSchema = z.object({
   SLACK_CLIENT_ID: optionalString,
   SLACK_CLIENT_SECRET: optionalString,
   SLACK_REDIRECT_URI: optionalString,
+  SLACK_API_URL: z.string().url().default('https://slack.com/api'),
   SLACK_TOKEN_ENC_KEY: optionalString.refine(
     (v) => v === undefined || /^[0-9a-fA-F]{64}$/.test(v),
     'SLACK_TOKEN_ENC_KEY must be 64 hex characters (32 bytes)',
@@ -61,6 +63,8 @@ const envSchema = z.object({
     .int()
     .positive()
     .default(5 * 60 * 1000),
+  JOB_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  JOB_BACKOFF_MS: z.coerce.number().int().positive().default(30_000),
 
   ETHEREAL_USER: optionalString,
   ETHEREAL_PASS: optionalString,
