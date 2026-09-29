@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { EmailStatus } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { enqueueEmails } from '../queue/queue';
+import { indexCampaignEmails } from './search';
 import { AppError, badRequest } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { assignRoundRobin, computeScheduledTimes } from '../utils/schedule';
@@ -76,6 +77,9 @@ export async function createCampaign(input: CreateCampaignInput) {
       'QUEUE_UNAVAILABLE',
     );
   }
+
+  // Search indexing is best-effort and must not delay or fail the request.
+  void indexCampaignEmails(campaignId);
 
   logger.info({ campaignId, emails: emails.length }, 'Campaign scheduled');
   return { campaign, emails };
