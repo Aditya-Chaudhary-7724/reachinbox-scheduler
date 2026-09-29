@@ -94,7 +94,7 @@ model SlackConnection {
   teamId     String
   teamName   String
   channel    String
-  // AES-256-GCM ciphertext (iv:tag:data, base64) of the incoming webhook URL.
+  // AES-256-GCM ciphertext (base64 iv.tag.data) of the incoming webhook URL.
   webhookUrl String
   createdAt  DateTime @default(now())
 
