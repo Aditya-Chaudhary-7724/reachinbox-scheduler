@@ -135,7 +135,7 @@ flowchart TB
 ## Local setup
 
 **Prerequisites:**
-- Node.js **20 or newer** (developed and tested on Node 24);
+- Node.js **20+** is expected (development and testing were done on Node 24; Node 20 was not tested explicitly);
 - npm;
 - Docker with Compose v2;
 - internet access (Google, Ethereal and Slack).
@@ -190,15 +190,30 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 **Production-style run** (compiled JavaScript):
 
+macOS / Linux:
+
 ```bash
 cd backend
 npm run build
-NODE_ENV=production npm start           # API  (dist/src/server.js)
-NODE_ENV=production npm run start:worker # worker (dist/src/worker.js)
+NODE_ENV=production npm start             # API    (dist/src/server.js)
+NODE_ENV=production npm run start:worker  # worker (dist/src/worker.js), in a second terminal
 
 cd ../frontend
 npm run build
-npm start                               # next start -p 5173
+npm start                                 # next start -p 5173
+```
+
+Windows PowerShell (each `$env:` variable stays set for the rest of that terminal session):
+
+```powershell
+cd backend
+npm run build
+$env:NODE_ENV="production"; npm start              # API
+$env:NODE_ENV="production"; npm run start:worker   # worker, in a second terminal
+
+cd ..\frontend
+npm run build
+npm start
 ```
 
 **Useful extra commands (backend)**
@@ -504,7 +519,11 @@ The campaign's `hourlyLimit` is **per sender**, so the outcome depends on how ma
 
 **B2: "about 200 in the first hour": one sender, or a global cap `MAX_EMAILS_PER_HOUR=200`**
 - **Window 1:** 200 sent.
-- **The other 800 are deferred into the global scope, 200 per window:** 11:00, 12:00, 13:00 and 14:00, taking about 200 × 2 s ≈ 6 min 40 s at the start of each hour.
+- **The other 800 are deferred, 200 per window:** 11:00, 12:00, 13:00 and 14:00, taking about 200 × 2 s ≈ 6 min 40 s at the start of each hour. Which Redis counters hold those deferrals depends on which limit was hit:
+  - **one sender with `hourlyLimit = 200`:** the sender's own counters (`rl:{senderId}:…` and `rl:defer:{senderId}:…`);
+  - **`MAX_EMAILS_PER_HOUR = 200`:** the shared global counters (`rl:global:…` and `rl:defer:global:…`).
+
+  The numbers come out the same either way.
 - **Total:** 5 windows, so the last emails go out around **14:07** for a 10:00 start.
 - **Slack:** exactly one alert for the first window, with the limit, the window, the number deferred and the next window start.
 
@@ -526,8 +545,8 @@ Running 3 worker processes × concurrency 5 against the same Redis and Postgres:
 
 | Concern | Why it holds across workers | Tested |
 | ------- | --------------------------- | ------ |
-| Minimum gap between sends | The BullMQ limiter is a single Redis key per queue, so throughput stays at one start per `I` in total, not per worker | 1 start per 2.00 s observed with multiple workers |
-| Hourly quota | Check-and-increment runs **inside one Lua script**, which Redis runs atomically, so no worker sees a stale count | 100 concurrent checks with limit 10 → exactly 10 allowed |
+| Minimum gap between sends | The BullMQ limiter is a single Redis key per queue, so throughput stays at one start per `I` in total, not per worker | Measured load test with **2 worker processes** and `MIN_SEND_INTERVAL_MS=50`: 1200 jobs took **~60 s** (≈ 1200 × 50 ms, one start per 50 ms *overall*) |
+| Hourly quota | Check-and-increment runs **inside one Lua script**, which Redis runs atomically, so no worker sees a stale count | Same 2-worker run: limit 50/h × 3 senders gave exactly **150 sent** in the current hour and **1050 deferred**, with no sender over 50. The two workers shared the limit rather than each getting 50/h. Unit test: 100 concurrent checks with limit 10 → exactly 10 allowed |
 | Deferral order | `INCR` hands out each slot number exactly once | 30 concurrent deferrals → 30 distinct slots |
 | Duplicate sends | Postgres row-level atomic claim | 10 concurrent claims → 1 winner |
 | Boot reconciliation | Redis `SET NX` lock; duplicates are also harmless because of jobId and the claim | |
@@ -542,8 +561,8 @@ The backend tests are integration tests. They need the Docker services running a
 docker compose up -d --wait
 
 cd backend
-npm run test:db        # creates/migrates reachinbox_test (safe to re-run)
-npm test               # vitest: 46 tests
+npm run test:db        # creates/migrates reachinbox_test (safe to re-run); see the Windows note below
+npm test               # Vitest
 npm run lint           # eslint (no `any`, no console)
 npm run typecheck      # tsc --noEmit
 npm run format:check   # prettier --check
@@ -556,6 +575,17 @@ npm run typecheck      # tsc --noEmit
 npm run format:check
 npm run build          # production build
 ```
+
+**On Windows:** the `test:db` script uses Unix-shell syntax (`DATABASE_URL=… prisma migrate deploy`), so run its equivalent in PowerShell instead. Use a **separate terminal**, because `$env:DATABASE_URL` stays set for that session and would point `npm run dev` at the test database:
+
+```powershell
+cd backend
+$env:DATABASE_URL="postgresql://reachinbox:reachinbox@localhost:5433/reachinbox_test?schema=public"; npx prisma migrate deploy
+```
+
+Every other test, lint, typecheck, format and build command above works the same on Windows.
+
+At the time of this submission, the backend suite contains 46 tests and the frontend suite 4.
 
 **What the tests cover:**
 
@@ -575,11 +605,26 @@ npm run build          # production build
 
 Schedules a large campaign whose leads are all due at once, with a low hourly limit, to show deferral into later windows. It runs as a separate "Load Test" user. Run the worker in mock mode so nothing goes through Ethereal, and make sure **no other worker is running** (e.g. stop `npm run dev:all`), or that worker will also pick up the jobs:
 
+Terminal 1, the mock-mode worker:
+
+```bash
+# macOS / Linux
+cd backend
+MOCK_SMTP=true MIN_SEND_INTERVAL_MS=50 npm run dev:worker
+```
+
+```powershell
+# Windows PowerShell (the variables stay set for this terminal session only)
+cd backend
+$env:MOCK_SMTP="true"; $env:MIN_SEND_INTERVAL_MS="50"; npm run dev:worker
+```
+
+Terminal 2, the same on every platform:
+
 ```bash
 cd backend
-MOCK_SMTP=true MIN_SEND_INTERVAL_MS=50 npm run dev:worker     # terminal 1
-npm run load-test -- --count 1200 --hourly-limit 50 --watch  # terminal 2
-npm run load-test -- --cleanup                               # afterwards
+npm run load-test -- --count 1200 --hourly-limit 50 --watch
+npm run load-test -- --cleanup       # afterwards
 ```
 
 **What `--watch` prints:**
@@ -611,9 +656,28 @@ Rate-limit state belonging to other users is left alone.
 3. Start `npm run dev:all` again. The email is sent right away, **once**. In the Sent tab it shows up once, and `attempts = 1` in the database.
 
 **3. Rate limit and Slack (~1 min)**
-1. With Slack connected, schedule **4 leads** with **hourly limit 1**. With 3 senders round-robin, sender 1 gets 2 emails: 3 are sent and 1 becomes **Rate limited**, rescheduled to the next hour window (the row shows "moved from …").
-2. `#channel` receives **one** "Hourly send limit reached" alert.
-3. For a single alert that covers everything, set `MAX_EMAILS_PER_HOUR=1` and restart. Then 3 leads give 1 sent, 2 deferred and 1 global alert.
+
+> **Start from a clean rate-limit state.** Hourly counters are kept **per sender per UTC hour** and shared by every campaign and user. Anything those senders already sent earlier in the same UTC hour (steps 1–2, or other tests) counts toward the limit.
+>
+> Run this part **at the start of a fresh UTC hour, before anything else is sent that hour**, and with no other emails due in it. (You can also record it first.) Otherwise more emails will be deferred than listed below, and there can be up to one alert per sender, so the exact numbers aren't guaranteed.
+
+**Per-sender limit** (`MAX_EMAILS_PER_HOUR` unset, Slack connected):
+1. Schedule **4 leads** with **hourly limit 1**, starting a minute or so ahead but still within the same hour.
+2. Round-robin assigns sender 1 → lead 1, sender 2 → lead 2, sender 3 → lead 3, sender 1 → lead 4.
+3. From a clean state, **3 are sent** and **lead 4 becomes Rate limited**. It's rescheduled to the start of the next UTC hour, and its row shows "moved from …".
+4. `#channel` receives **one** "Hourly send limit reached" alert, for sender 1.
+
+**Global cap** (optional, shows the global limit):
+1. Set `MAX_EMAILS_PER_HOUR=1` in `backend/.env` and restart the API and worker.
+2. Schedule **3 leads** (one per sender) with **hourly limit 50**.
+   - Each email is checked against its sender's limit first, then the global cap.
+   - A high per-sender limit means only the global cap can stop them.
+   - With hourly limit 1, a sender that already sent this hour would be stopped by its own limit first, with a separate per-sender alert.
+3. **Needs a clean state too:** no sender at its limit, and nothing sent this UTC hour while the global cap was on. (The global counter only counts while `MAX_EMAILS_PER_HOUR` is set.)
+4. **Result from that state:**
+   - **1 sent** and **2 deferred:** the next hour's global capacity is 1, so one goes to the start of the next hour and the other rolls to the hour after.
+   - **one** alert for "all senders (global limit)".
+5. Remove `MAX_EMAILS_PER_HOUR` from `backend/.env` again and restart afterwards.
 
 **4. Bull Board.** Open `http://localhost:4000/admin/queues` (basic auth) and show the delayed jobs for the deferred emails.
 
