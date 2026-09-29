@@ -16,5 +16,5 @@
     "forceConsistentCasingInFileNames": true,
     "sourceMap": true
   },
-  "include": ["src", "prisma", "tests", "vitest.config.ts"]
+  "include": ["src", "prisma", "tests", "vitest.config.mts"]
 }
