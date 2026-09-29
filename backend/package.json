@@ -24,7 +24,8 @@
     "reindex": "tsx src/scripts/reindex.ts",
     "load-test": "tsx src/scripts/load-test.ts",
     "dev:token": "tsx src/scripts/dev-token.ts",
-    "test:db": "DATABASE_URL=postgresql://reachinbox:reachinbox@localhost:5433/reachinbox_test?schema=public prisma migrate deploy"
+    "test:db": "DATABASE_URL=postgresql://reachinbox:reachinbox@localhost:5433/reachinbox_test?schema=public prisma migrate deploy",
+    "format:check": "prettier --check ."
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

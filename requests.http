@@ -1,0 +1,122 @@
+### ReachInbox Scheduler: API request collection
+# Works with the VS Code "REST Client" extension and JetBrains HTTP Client.
+#
+# Authentication: every /api route (except the Slack OAuth callback) needs the session JWT,
+# sent either as the `session` cookie (what the browser does) or as a Bearer token.
+# Get a token for local testing (development only, refuses to run in production):
+#   cd backend && npm run dev:token -- you@example.com "Your Name"
+# and paste it below. Never commit a real token.
+
+@baseUrl = http://localhost:4000
+@session = <paste-session-jwt-here>
+
+### Health (Postgres, Redis, Elasticsearch)
+GET {{baseUrl}}/health
+
+############################################################
+# Auth
+############################################################
+
+### Start Google OAuth (open in a browser; responds 302 to Google)
+# Google then redirects to /auth/google/callback, which sets the session cookie and
+# redirects to FRONTEND_URL/dashboard.
+GET {{baseUrl}}/auth/google
+
+### Current user
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{session}}
+
+### Same request using the session cookie instead of the Bearer header
+GET {{baseUrl}}/auth/me
+Cookie: session={{session}}
+
+### Logout (clears the session cookie)
+POST {{baseUrl}}/auth/logout
+
+############################################################
+# Campaigns and emails
+############################################################
+
+### Senders (round-robin pool created by `npm run seed`)
+GET {{baseUrl}}/api/senders
+Authorization: Bearer {{session}}
+
+### Counts per status (+ scheduled/sent tab totals)
+GET {{baseUrl}}/api/stats
+Authorization: Bearer {{session}}
+
+### Schedule a campaign
+# leads are normalised (trimmed, lowercased), de-duplicated and validated server-side.
+# scheduledAt for lead i = startTime + i * delayBetweenMs (a past startTime means "now").
+POST {{baseUrl}}/api/campaigns
+Authorization: Bearer {{session}}
+Content-Type: application/json
+
+{
+  "subject": "Quick question",
+  "body": "Hi there,\nThis is a test email from ReachInbox Scheduler.",
+  "leads": ["alice@example.com", "bob@example.com", "carol@example.com"],
+  "startTime": "2030-01-01T09:00:00.000Z",
+  "delayBetweenMs": 2000,
+  "hourlyLimit": 50
+}
+
+### Validation error example (400 with per-field messages)
+POST {{baseUrl}}/api/campaigns
+Authorization: Bearer {{session}}
+Content-Type: application/json
+
+{
+  "subject": "",
+  "body": "x",
+  "leads": [],
+  "startTime": "not-a-date",
+  "delayBetweenMs": -1,
+  "hourlyLimit": 0
+}
+
+### Scheduled emails (SCHEDULED, SENDING, RATE_LIMITED), paginated
+GET {{baseUrl}}/api/emails?status=scheduled&page=1&limit=20
+Authorization: Bearer {{session}}
+
+### Sent emails (SENT, FAILED), paginated
+GET {{baseUrl}}/api/emails?status=sent&page=1&limit=20
+Authorization: Bearer {{session}}
+
+### Full-text search (Elasticsearch) over recipient, subject and body
+# status is optional: scheduled | sent
+GET {{baseUrl}}/api/emails/search?q=alice&status=sent&page=1&limit=20
+Authorization: Bearer {{session}}
+
+############################################################
+# Slack
+############################################################
+
+### Connection status
+GET {{baseUrl}}/api/slack/status
+Authorization: Bearer {{session}}
+
+### Get the Slack authorize URL as JSON (omit ?redirect=false to get a 302 instead)
+GET {{baseUrl}}/api/slack/connect?redirect=false
+Authorization: Bearer {{session}}
+
+### OAuth callback (called by Slack via SLACK_REDIRECT_URI, not by hand)
+# Needs a real `code` from Slack and the signed `state` from /api/slack/connect.
+# Redirects to FRONTEND_URL/dashboard?slack=connected|denied|error
+GET {{baseUrl}}/api/slack/callback?code=<code-from-slack>&state=<state-from-connect-url>
+
+### Send a test message to the connected channel
+POST {{baseUrl}}/api/slack/test
+Authorization: Bearer {{session}}
+
+### Disconnect Slack
+DELETE {{baseUrl}}/api/slack
+Authorization: Bearer {{session}}
+
+############################################################
+# Bull Board (queue monitor, HTTP basic auth: BULL_BOARD_USER / BULL_BOARD_PASS)
+############################################################
+
+### Open in a browser for the UI; this request only checks access
+GET {{baseUrl}}/admin/queues
+Authorization: Basic <bull-board-user> <bull-board-pass>

@@ -152,7 +152,7 @@ export interface RateLimitAlert {
 export function formatRateLimitAlert(a: RateLimitAlert): SlackMessage {
   const hhmm = (d: Date) => d.toISOString().slice(11, 16);
   const text =
-    `:warning: Hourly send limit reached for ${a.scope}: ${a.limit} emails/hour ` +
+    `:warning: Hourly send limit reached for ${a.scope}: ${a.limit} ${a.limit === 1 ? 'email' : 'emails'}/hour ` +
     `(window ${hhmm(a.windowStart)}–${hhmm(a.windowEnd)} UTC). ` +
     `${a.deferredCount} email(s) deferred; sending resumes at ${a.nextWindowAt.toISOString()}.`;
   return {

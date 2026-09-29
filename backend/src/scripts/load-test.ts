@@ -20,6 +20,7 @@ import { emailQueue } from '../queue/queue';
 import { effectiveHourlyLimit, hourWindowAt } from '../queue/rateLimiter';
 import { esClient } from '../services/search';
 import { createCampaign } from '../services/scheduler';
+import { cleanupLoadTestData } from './loadTestCleanup';
 
 const LOAD_TEST_GOOGLE_ID = 'loadtest:reachinbox';
 const out = (line = '') => process.stdout.write(`${line}\n`);
@@ -50,24 +51,15 @@ async function loadTestUser() {
 
 async function cleanup() {
   const user = await loadTestUser();
-  const ids = await prisma.email.findMany({ where: { userId: user.id }, select: { id: true } });
-  let removed = 0;
-  for (const { id } of ids) {
-    const job = await emailQueue.getJob(id);
-    if (job) {
-      await job.remove();
-      removed++;
-    }
+  const r = await cleanupLoadTestData(user.id);
+  out(`Removed ${r.emails} load-test emails and ${r.jobsRemoved} queued jobs.`);
+  out(
+    `Redis: ${r.notifiedKeysDeleted} alert guard(s) and ${r.deferKeysDeleted.length} deferral counter(s) deleted, ` +
+      `${r.quotaReturned} unit(s) of this hour's quota returned.`,
+  );
+  if (r.deferKeysKept.length > 0) {
+    out(`Kept ${r.deferKeysKept.length} deferral counter(s) still used by other users' emails.`);
   }
-  await esClient
-    .deleteByQuery({
-      index: env.ELASTICSEARCH_INDEX,
-      query: { term: { userId: user.id } },
-      refresh: true,
-    })
-    .catch(() => undefined);
-  await prisma.user.delete({ where: { id: user.id } }); // cascades campaigns + emails
-  out(`Removed ${ids.length} load-test emails and ${removed} queued jobs.`);
 }
 
 async function report(userId: string, campaignId: string, limit: number) {

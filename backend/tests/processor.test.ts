@@ -8,7 +8,7 @@ import type { EmailJobData } from '../src/queue/queue';
 import { hourWindowAt } from '../src/queue/rateLimiter';
 import { signToken } from '../src/services/auth';
 import { esClient } from '../src/services/search';
-import { completeSlackOAuth } from '../src/services/slack';
+import { completeSlackOAuth, formatRateLimitAlert } from '../src/services/slack';
 import { createFixtures, startSlackStub } from './helpers';
 
 /** Minimal stand-in for a BullMQ Job that records moveToDelayed calls. */
@@ -120,5 +120,21 @@ describe('processEmailJob with hourly limits (MOCK_SMTP)', () => {
     expect(row.sentAt).not.toBeNull();
     expect(await processEmailJob(fakeJob(email.id).job, 'token')).toBe('skipped');
     await fx.cleanup();
+  });
+});
+
+describe('formatRateLimitAlert wording', () => {
+  const base = {
+    scope: 'sender@example.com',
+    windowStart: new Date('2026-03-07T14:00:00Z'),
+    windowEnd: new Date('2026-03-07T15:00:00Z'),
+    deferredCount: 3,
+    nextWindowAt: new Date('2026-03-07T15:00:00Z'),
+  };
+
+  it('uses singular and plural correctly for the hourly limit', () => {
+    expect(formatRateLimitAlert({ ...base, limit: 1 }).text).toContain(': 1 email/hour ');
+    expect(formatRateLimitAlert({ ...base, limit: 2 }).text).toContain(': 2 emails/hour ');
+    expect(formatRateLimitAlert({ ...base, limit: 200 }).text).toContain(': 200 emails/hour ');
   });
 });

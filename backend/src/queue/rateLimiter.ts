@@ -51,7 +51,8 @@ export type Scope = { kind: 'sender'; senderId: string } | { kind: 'global' };
 
 const scopeId = (scope: Scope) => (scope.kind === 'sender' ? scope.senderId : 'global');
 export const quotaKey = (scope: Scope, window: HourWindow) => `rl:${scopeId(scope)}:${window.key}`;
-const deferKey = (scope: Scope, window: HourWindow) => `rl:defer:${scopeId(scope)}:${window.key}`;
+export const deferKey = (scope: Scope, window: HourWindow) =>
+  `rl:defer:${scopeId(scope)}:${window.key}`;
 
 export type QuotaDecision =
   | { allowed: true; count: number; window: HourWindow }
