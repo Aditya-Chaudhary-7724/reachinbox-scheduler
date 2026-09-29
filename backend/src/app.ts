@@ -4,7 +4,10 @@ import express from 'express';
 import pinoHttp from 'pino-http';
 import { env } from './config/env';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
+import { authRouter } from './routes/auth';
+import { BULL_BOARD_PATH, createBullBoardRouter } from './routes/bullBoard';
 import { healthRouter } from './routes/health';
+import { apiRouter } from './routes/index';
 import { logger } from './utils/logger';
 
 export function createApp() {
@@ -18,6 +21,9 @@ export function createApp() {
   app.use(cookieParser());
 
   app.use(healthRouter);
+  app.use('/auth', authRouter);
+  app.use('/api', apiRouter);
+  app.use(BULL_BOARD_PATH, createBullBoardRouter());
 
   app.use(notFoundHandler);
   app.use(errorHandler);
