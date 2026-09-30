@@ -297,7 +297,7 @@ The login is a server-side authorization-code flow:
 ```
 dashboard "Continue with Google" → GET http://localhost:4000/auth/google
   → Google consent → GET http://localhost:4000/auth/google/callback?code&state
-  → user created or updated, session JWT set as an httpOnly SameSite=Lax cookie
+  → user created or updated, session JWT set as an httpOnly cookie (SameSite=Lax locally; SameSite=None; Secure in production)
   → redirect to http://localhost:5173/dashboard
 ```
 
@@ -593,7 +593,7 @@ $env:DATABASE_URL="postgresql://reachinbox:reachinbox@localhost:5433/reachinbox_
 
 Every other test, lint, typecheck, format and build command above works the same on Windows.
 
-At the time of this submission, the backend suite contains 51 tests and the frontend suite 4.
+At the time of this submission, the backend suite contains 56 tests and the frontend suite 4.
 
 **What the tests cover:**
 
@@ -700,6 +700,10 @@ Rate-limit state belonging to other users is left alone.
 - **Search** is eventually consistent. Results are loaded from Postgres so statuses are always current, and `npm run reindex` rebuilds the index.
 - **Slack alerts** go once per *user* per sender per window, so a sender shared by several users alerts each of them. A free ngrok URL changes on restart (see the Slack section).
 - **Sessions** are stateless JWTs (7 days). Logout clears the cookie; there's no server-side revocation list.
-- **Cookies** are `SameSite=Lax` and only `Secure` in production. The dashboard and API are expected on the same site (e.g. `localhost`, or sub-domains of one domain). A cross-site deployment would need `SameSite=None; Secure`.
+- **Session cookie:** locally it's `HttpOnly; SameSite=Lax` over plain `http://localhost`. With `NODE_ENV=production` it's `HttpOnly; Secure; SameSite=None`, so it's sent even when the dashboard and API are on different sites (e.g. separate `*.up.railway.app` domains). No `Domain` attribute is set, so the API remains the cookie's owner.
+  - To the dashboard, this is a third-party cookie.
+  - **Chrome** sends it with default settings.
+  - **Safari** blocks third-party cookies, and **Firefox** keeps them in separate per-site storage, so on those browsers login can succeed but API calls then return 401.
+  - Hosting the dashboard and API under one domain (e.g. `app.example.com` and `api.example.com`) avoids this.
 - **Ethereal SMTP passwords** in the `Sender` table are stored in plain text. They're throwaway test accounts; only the Slack webhook is encrypted, as required.
 - **UI design:** the Figma file wasn't available, so the dashboard follows the written requirements.

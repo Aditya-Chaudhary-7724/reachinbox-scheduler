@@ -2,7 +2,7 @@ import type { CookieOptions } from 'express';
 import { OAuth2Client } from 'google-auth-library';
 import jwt from 'jsonwebtoken';
 import type { User } from '@prisma/client';
-import { env } from '../config/env';
+import { env, type Env } from '../config/env';
 import { prisma } from '../db/prisma';
 import { serviceUnavailable, unauthorized } from '../utils/errors';
 
@@ -39,11 +39,18 @@ export function signSessionToken(userId: string): string {
   return signToken(userId, 'session', SESSION_TTL_SECONDS);
 }
 
-export function sessionCookieOptions(): CookieOptions {
+/**
+ * In production the dashboard and API live on different sites (separate *.up.railway.app
+ * domains), so the session cookie must be SameSite=None to be sent on the dashboard's
+ * credentialed requests; browsers only accept SameSite=None together with Secure.
+ * Local development keeps SameSite=Lax over plain http://localhost.
+ */
+export function sessionCookieOptions(nodeEnv: Env['NODE_ENV'] = env.NODE_ENV): CookieOptions {
+  const production = nodeEnv === 'production';
   return {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: env.NODE_ENV === 'production',
+    sameSite: production ? 'none' : 'lax',
+    secure: production,
     path: '/',
     maxAge: SESSION_TTL_SECONDS * 1000,
   };
