@@ -31,7 +31,7 @@ No cron is used anywhere. Every email is a **BullMQ delayed job** in Redis, and 
 
 **Backend**
 
-- **Scheduling:** `POST /api/campaigns` validates the input, cleans up and de-duplicates the leads, and creates the Campaign and Email rows in one transaction. It then enqueues one BullMQ delayed job per email with `jobId = emailId`. Lead *i* is scheduled at `startTime + i × delayBetweenMs`, and senders are assigned round-robin.
+- **Scheduling:** `POST /api/campaigns` validates the input, cleans up and de-duplicates the leads, and creates the Campaign and Email rows in one transaction. It then enqueues one BullMQ delayed job per email with `jobId = emailId`. Lead *i* is scheduled at `startTime + i × delayBetweenMs`. Senders are assigned round-robin, unless the request names one sender (`senderId`), in which case that sender sends every email in the campaign.
 - **Persistence:**
   - Redis runs with AOF (`appendfsync everysec`) on a named volume, so delayed jobs survive a Redis restart.
   - A **reconciliation pass** runs once at boot. It recreates the job for any pending email whose job is missing, for example after Redis was wiped.
@@ -54,6 +54,7 @@ No cron is used anywhere. Every email is a **BullMQ delayed job** in Redis, and 
   - subject and body;
   - CSV/TXT upload (emails are found in any column and de-duplicated; you see "N emails detected" and a preview);
   - start time, delay between emails, and hourly limit;
+  - a **Sender** dropdown: "All senders (round-robin)" by default, or one specific sender for the whole campaign;
   - validation in the browser before anything is sent.
 - **Scheduled table** columns: email, subject, scheduled time in your local timezone, and status (Scheduled, Sending or Rate limited).
 - **Sent table** columns: email, subject, sent time, status (Sent or Failed), and an Ethereal preview link.
@@ -122,7 +123,7 @@ flowchart TB
 **Request flow for a campaign**
 
 1. The dashboard sends `POST /api/campaigns` with the session cookie. The API validates the body and cleans up the leads.
-2. **In one Postgres transaction:** it creates the Campaign and all Email rows (`status = SCHEDULED`, `scheduledAt = startTime + i × delay`, sender chosen round-robin).
+2. **In one Postgres transaction:** it creates the Campaign and all Email rows (`status = SCHEDULED`, `scheduledAt = startTime + i × delay`, sender chosen round-robin or the one selected sender).
 3. **After the commit:** it calls `queue.addBulk` in chunks of 500. Each job is `{ jobId: emailId, delay: max(0, scheduledAt − now), data: { emailId } }`, and Elasticsearch is bulk-indexed.
 4. **When a job is due, the worker:**
    1. claims the row atomically;
@@ -396,7 +397,7 @@ All `/api/*` routes need the session, sent as the `session` cookie or `Authoriza
 | GET | `/auth/google/callback` | Google redirect target; sets the session cookie, then 302 to the dashboard |
 | GET | `/auth/me` | `{ id, name, email, avatarUrl }` |
 | POST | `/auth/logout` | Clears the session cookie (204) |
-| POST | `/api/campaigns` | Body `{ subject, body, leads: string[], startTime: ISO, delayBetweenMs, hourlyLimit }`. Returns 201 with `scheduled`, `invalid[]`, `duplicatesRemoved`, and the first and last scheduled times |
+| POST | `/api/campaigns` | Body `{ subject, body, leads: string[], startTime: ISO, delayBetweenMs, hourlyLimit, senderId? }`. `senderId` is optional (an id from `GET /api/senders`): when set, every email uses that sender and its hourly limit; an unknown id returns 400. Returns 201 with `scheduled`, `invalid[]`, `duplicatesRemoved`, and the first and last scheduled times |
 | GET | `/api/emails?status=scheduled\|sent&page&limit` | Paginated list: `scheduled` = SCHEDULED/SENDING/RATE_LIMITED, `sent` = SENT/FAILED |
 | GET | `/api/emails/search?q=&status=&page&limit` | Elasticsearch search over recipient, subject and body, for your emails only |
 | GET | `/api/stats` | Counts per status, plus `scheduled` and `sent` totals |
@@ -593,7 +594,7 @@ $env:DATABASE_URL="postgresql://reachinbox:reachinbox@localhost:5433/reachinbox_
 
 Every other test, lint, typecheck, format and build command above works the same on Windows.
 
-At the time of this submission, the backend suite contains 56 tests and the frontend suite 4.
+At the time of this submission, the backend suite contains 64 tests and the frontend suite 4.
 
 **What the tests cover:**
 
@@ -602,7 +603,7 @@ At the time of this submission, the backend suite contains 56 tests and the fron
 | Lua rate limiter (real Redis) | Allows up to N then denies; exact under 100 concurrent calls; hours counted separately; global cap |
 | Deferral | Ordered slots, next-hour rollover, unique slots under concurrency |
 | Hour windows | UTC keys and slot times (pure functions) |
-| Scheduling | `scheduledAt` spacing and round-robin assignment |
+| Scheduling | `scheduledAt` spacing, round-robin assignment, and a selected sender used for every email (unknown sender rejected) |
 | Idempotency | Concurrent claims; stale reclaim; not claimable before due |
 | Processor end-to-end | Send, defer, one Slack alert, no resend |
 | Slack | OAuth code exchange with encrypted storage; callback redirects; webhook failures don't throw; disconnected = skipped |

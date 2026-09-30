@@ -48,6 +48,7 @@ Authorization: Bearer {{session}}
 ### Schedule a campaign
 # leads are normalised (trimmed, lowercased), de-duplicated and validated server-side.
 # scheduledAt for lead i = startTime + i * delayBetweenMs (a past startTime means "now").
+# Without senderId, emails are spread round-robin across all senders.
 POST {{baseUrl}}/api/campaigns
 Authorization: Bearer {{session}}
 Content-Type: application/json
@@ -59,6 +60,23 @@ Content-Type: application/json
   "startTime": "2030-01-01T09:00:00.000Z",
   "delayBetweenMs": 2000,
   "hourlyLimit": 50
+}
+
+### Schedule a campaign from one specific sender
+# senderId is an `id` from GET /api/senders. Every email uses that sender, so the hourly
+# limit applies to it alone. An unknown id returns 400.
+POST {{baseUrl}}/api/campaigns
+Authorization: Bearer {{session}}
+Content-Type: application/json
+
+{
+  "subject": "Quick question",
+  "body": "Hi there,\nThis campaign is sent from a single selected sender.",
+  "leads": ["alice@example.com", "bob@example.com"],
+  "startTime": "2030-01-01T09:00:00.000Z",
+  "delayBetweenMs": 2000,
+  "hourlyLimit": 50,
+  "senderId": "<sender-id-from-GET-/api/senders>"
 }
 
 ### Validation error example (400 with per-field messages)

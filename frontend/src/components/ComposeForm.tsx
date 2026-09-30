@@ -1,14 +1,15 @@
 'use client';
 
 import { useMemo, useState, type FormEvent } from 'react';
-import { ApiError, apiFetch } from '@/lib/api';
+import useSWR from 'swr';
+import { ApiError, apiFetch, fetcher } from '@/lib/api';
 import { formatDateTime, pluralize, toDateTimeLocalValue } from '@/lib/format';
 import { extractLeads, type ParsedLeads } from '@/lib/leads';
-import type { CreateCampaignRequest, CreateCampaignResponse } from '@/types/api';
+import type { CreateCampaignRequest, CreateCampaignResponse, Sender } from '@/types/api';
 import { SendIcon } from './icons';
 import { Button } from './ui/Button';
 import { DateTimePicker } from './ui/DateTimePicker';
-import { Field } from './ui/Field';
+import { Field, controlClass } from './ui/Field';
 import { FileUpload } from './ui/FileUpload';
 import { Input } from './ui/Input';
 import { Modal } from './ui/Modal';
@@ -25,6 +26,8 @@ interface FormState {
   startTime: string;
   delaySeconds: string;
   hourlyLimit: string;
+  /** '' = round-robin across all senders. */
+  senderId: string;
 }
 
 type Errors = Partial<Record<keyof FormState | 'leads', string>>;
@@ -35,6 +38,7 @@ const initialState = (): FormState => ({
   startTime: toDateTimeLocalValue(new Date(Date.now() + 5 * 60 * 1000)),
   delaySeconds: '2',
   hourlyLimit: '50',
+  senderId: '',
 });
 
 function validate(form: FormState, leads: ParsedLeads | null): Errors {
@@ -75,6 +79,7 @@ export function ComposeForm({
 }) {
   const toast = useToast();
   const [form, setForm] = useState<FormState>(initialState);
+  const senders = useSWR<{ items: Sender[] }, ApiError>(open ? '/api/senders' : null, fetcher);
   const [leads, setLeads] = useState<ParsedLeads | null>(null);
   const [fileName, setFileName] = useState<string>();
   const [errors, setErrors] = useState<Errors>({});
@@ -136,6 +141,7 @@ export function ComposeForm({
       startTime: new Date(form.startTime).toISOString(),
       delayBetweenMs: Math.round(Number(form.delaySeconds) * 1000),
       hourlyLimit: Number(form.hourlyLimit),
+      ...(form.senderId ? { senderId: form.senderId } : {}),
     };
 
     setSubmitting(true);
@@ -241,6 +247,32 @@ export function ComposeForm({
               </ul>
             </div>
           ) : null}
+        </Field>
+
+        <Field
+          label="Sender"
+          htmlFor="sender"
+          hint={
+            form.senderId
+              ? 'Every email in this campaign is sent from this sender; the hourly limit applies to it alone.'
+              : 'Emails are spread round-robin across all senders.'
+          }
+          error={senders.error ? 'Could not load senders' : undefined}
+        >
+          <select
+            id="sender"
+            value={form.senderId}
+            onChange={(e) => set('senderId', e.target.value)}
+            disabled={!senders.data}
+            className={`${controlClass(Boolean(senders.error))} h-10 pr-8`}
+          >
+            <option value="">All senders (round-robin)</option>
+            {senders.data?.items.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.email}
+              </option>
+            ))}
+          </select>
         </Field>
 
         <div className="grid gap-5 sm:grid-cols-3">

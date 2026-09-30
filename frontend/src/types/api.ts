@@ -43,6 +43,12 @@ export type SlackStatus =
   | { connected: true; teamName: string; channel: string }
   | { connected: false; teamName: null; channel: null };
 
+export interface Sender {
+  id: string;
+  name: string;
+  email: string;
+}
+
 export interface CreateCampaignRequest {
   subject: string;
   body: string;
@@ -50,6 +56,8 @@ export interface CreateCampaignRequest {
   startTime: string;
   delayBetweenMs: number;
   hourlyLimit: number;
+  /** Omit to spread the campaign round-robin across all senders. */
+  senderId?: string;
 }
 
 export interface CreateCampaignResponse {

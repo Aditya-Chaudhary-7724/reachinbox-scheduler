@@ -22,6 +22,8 @@ export const createCampaignSchema = z.object({
     .min(0)
     .max(24 * 60 * 60 * 1000),
   hourlyLimit: z.number().int().min(1).max(100_000),
+  // Optional: send every email from this sender instead of round-robin across all senders.
+  senderId: z.string().uuid().optional(),
 });
 
 type CreateCampaignBody = z.infer<typeof createCampaignSchema>;
@@ -46,6 +48,7 @@ campaignsRouter.post(
       startTime: new Date(body.startTime),
       delayBetweenMs: body.delayBetweenMs,
       hourlyLimit: body.hourlyLimit,
+      senderId: body.senderId,
     });
 
     const first = emails[0];

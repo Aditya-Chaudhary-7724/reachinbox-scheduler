@@ -15,10 +15,18 @@ export interface CreateCampaignInput {
   startTime: Date;
   delayBetweenMs: number;
   hourlyLimit: number;
+  /** When set, every email uses this sender; otherwise senders are assigned round-robin. */
+  senderId?: string;
 }
 
 export async function createCampaign(input: CreateCampaignInput) {
-  const senders = await prisma.sender.findMany({ orderBy: { createdAt: 'asc' } });
+  const senders = await prisma.sender.findMany({
+    where: input.senderId ? { id: input.senderId } : undefined,
+    orderBy: { createdAt: 'asc' },
+  });
+  if (input.senderId && senders.length === 0) {
+    throw badRequest('The selected sender does not exist.');
+  }
   if (senders.length === 0) {
     throw badRequest('No senders configured. Run `npm run seed` in the backend.');
   }
