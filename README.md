@@ -249,7 +249,8 @@ If a variable is invalid, the process exits with a list of the problems.
 | `FRONTEND_URL` | `http://localhost:5173` | CORS origin and redirect target after login and Slack connect |
 | `LOG_LEVEL` | `info` | `fatal` · `error` · `warn` · `info` · `debug` · `trace` |
 | `REDIS_URL` | `redis://localhost:6379` | |
-| `ELASTICSEARCH_URL` | `http://localhost:9200` | |
+| `ELASTICSEARCH_URL` | `http://localhost:9200` | For Elastic Cloud, the deployment's Elasticsearch endpoint, e.g. `https://<deployment>.es.<region>.<provider>.elastic-cloud.com:443` |
+| `ELASTICSEARCH_API_KEY` | empty | Encoded API key for a secured cluster (e.g. Elastic Cloud); sent as `Authorization: ApiKey <key>`. Leave empty for the local Docker Elasticsearch, which has security disabled |
 | `ELASTICSEARCH_INDEX` | `emails` | |
 | `GOOGLE_CALLBACK_URL` | `http://localhost:4000/auth/google/callback` | Must match the redirect URI registered in Google Cloud |
 | `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` | empty | Slack is disabled (503) until all four Slack variables are set |
@@ -273,6 +274,13 @@ If a variable is invalid, the process exits with a list of the problems.
 | `MOCK_SMTP` | `false` | `true` uses nodemailer's `jsonTransport` (no network). Meant for the load test |
 | `SLACK_API_URL` | `https://slack.com/api` | Override only to point the OAuth exchange at a local stub (tests do this) |
 | `TEST_DATABASE_URL` / `TEST_REDIS_URL` | `…/reachinbox_test`, `redis://localhost:6379/15` | Read by `vitest.config.mts`; tests never touch dev data |
+
+**Elasticsearch in production (e.g. Elastic Cloud).** Set `ELASTICSEARCH_URL` to the deployment endpoint and `ELASTICSEARCH_API_KEY` to an **encoded** API key. The client then authenticates with that key; with no key it connects without auth, as it does locally. The key needs these privileges:
+- **Cluster `monitor`:** `GET /health` pings the cluster, and without this privilege the health check reports Elasticsearch as down.
+- **On the `ELASTICSEARCH_INDEX` index:** `create_index`, `view_index_metadata`, `read` and `write`, for creating the index at startup, indexing, searching and cleanup.
+- **`delete_index`** as well, if you run `npm run reindex`, which drops and rebuilds the index.
+
+Keep the key only in the hosting platform's environment variables, never in a committed file.
 
 ### Frontend (`frontend/.env.local`)
 
@@ -585,7 +593,7 @@ $env:DATABASE_URL="postgresql://reachinbox:reachinbox@localhost:5433/reachinbox_
 
 Every other test, lint, typecheck, format and build command above works the same on Windows.
 
-At the time of this submission, the backend suite contains 46 tests and the frontend suite 4.
+At the time of this submission, the backend suite contains 51 tests and the frontend suite 4.
 
 **What the tests cover:**
 

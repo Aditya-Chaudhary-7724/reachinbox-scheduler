@@ -24,7 +24,7 @@ const booleanString = z
   .optional()
   .transform((v) => v === 'true' || v === '1');
 
-const envSchema = z.object({
+export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
   // Exact origin of the dashboard (CORS + redirects), so any trailing slash is stripped.
@@ -38,6 +38,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
   ELASTICSEARCH_URL: z.string().url().default('http://localhost:9200'),
+  // Encoded API key for secured clusters (e.g. Elastic Cloud). Unset for local dev.
+  ELASTICSEARCH_API_KEY: optionalString,
   ELASTICSEARCH_INDEX: z.string().min(1).default('emails'),
 
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),

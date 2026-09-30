@@ -1,11 +1,21 @@
-import { Client, errors } from '@elastic/elasticsearch';
+import { Client, errors, type ClientOptions } from '@elastic/elasticsearch';
 import type { Email } from '@prisma/client';
-import { env } from '../config/env';
+import { env, type Env } from '../config/env';
 import { prisma } from '../db/prisma';
 import { logger } from '../utils/logger';
 import { SCHEDULED_STATUSES, SENT_STATUSES, toEmailDto, type EmailListKind } from './email';
 
-export const esClient = new Client({ node: env.ELASTICSEARCH_URL });
+/** API-key auth when a key is configured (e.g. Elastic Cloud); no auth for local dev. */
+export function elasticsearchClientOptions(
+  config: Pick<Env, 'ELASTICSEARCH_URL' | 'ELASTICSEARCH_API_KEY'>,
+): ClientOptions {
+  return {
+    node: config.ELASTICSEARCH_URL,
+    ...(config.ELASTICSEARCH_API_KEY ? { auth: { apiKey: config.ELASTICSEARCH_API_KEY } } : {}),
+  };
+}
+
+export const esClient = new Client(elasticsearchClientOptions(env));
 const INDEX = env.ELASTICSEARCH_INDEX;
 
 type IndexableEmail = Email & { sender: { email: string } };
